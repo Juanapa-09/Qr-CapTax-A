@@ -1,0 +1,1595 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CapTax-A | Sistema QR de Trazabilidad y Fichas Técnicas</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <!-- Librería estándar QRCode.js para generación real de QR -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            brand: {
+              950: '#041f10',
+              900: '#07361c',
+              800: '#005725',
+              700: '#006b2d',
+              600: '#007a33',
+              500: '#008a3c',
+              400: '#43b071',
+              100: '#e6f5ec',
+              50: '#f4f9f6',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    /* Estilos de impresión optimizados exclusivamente para la etiqueta logística */
+    @media print {
+      body * {
+        visibility: hidden !important;
+      }
+      #printable-label-area,
+      #printable-label-area * {
+        visibility: visible !important;
+      }
+      #printable-label-area {
+        position: fixed !important;
+        left: 50% !important;
+        top: 24px !important;
+        transform: translateX(-50%) !important;
+        width: 105mm !important;
+        border: 2px solid #111413 !important;
+        box-shadow: none !important;
+        background: #ffffff !important;
+        color: #111413 !important;
+        margin: 0 !important;
+        padding: 14px !important;
+      }
+      .no-print {
+        display: none !important;
+      }
+    }
+
+    /* Contenedor limpio del QR con zona muda (quiet zone) garantizada */
+    #qrcode-container img,
+    #qrcode-container canvas {
+      margin: 0 auto;
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
+
+    #scan-qrcode-mini img,
+    #scan-qrcode-mini canvas {
+      margin: 0 auto;
+      display: block;
+    }
+  </style>
+</head>
+<body class="bg-[#F4F7F5] text-[#111413] font-sans antialiased min-h-screen flex flex-col">
+
+  <!-- Barra de notificación Toast (sin uso de alert) -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- ===================================================================== -->
+  <!-- MODO 1: VISTA DE ESCANEO QR (Lo que ve el operario o cliente al escanear) -->
+  <!-- ===================================================================== -->
+  <div id="scan-view" class="hidden min-h-screen bg-[#111413] py-6 px-4 flex flex-col items-center justify-start">
+    <div class="w-full max-w-lg">
+      <!-- Barra superior de navegación de retorno al panel -->
+      <div class="flex items-center justify-between mb-4 bg-neutral-900 border border-neutral-700 rounded-2xl px-4 py-3 text-white shadow-lg">
+        <div class="flex items-center gap-2.5">
+          <span class="inline-flex h-2.5 w-2.5 rounded-full bg-brand-400 animate-pulse"></span>
+          <span class="text-xs font-semibold tracking-wider uppercase text-neutral-300">Lectura QR Verificada</span>
+        </div>
+        <button onclick="exitScanView()" class="text-xs font-bold bg-brand-600 hover:bg-brand-500 text-white px-3.5 py-2 rounded-xl transition cursor-pointer">
+          ← Volver al Panel de Registro
+        </button>
+      </div>
+
+      <!-- Tarjeta Móvil del Producto Escaneado -->
+      <div id="scan-card-content" class="bg-white rounded-3xl shadow-2xl overflow-hidden border border-neutral-200">
+        <!-- Contenido dinámico inyectado por JS -->
+      </div>
+
+      <p class="text-center text-neutral-400 text-xs mt-5">
+        Sistema Oficial de Trazabilidad Industrial · <strong class="text-brand-400">CapTax-A</strong>
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- MODO 2: PANEL DE GESTIÓN, REGISTRO E IMPRESIÓN DE QR (Planta/Logística) -->
+  <!-- ===================================================================== -->
+  <div id="admin-view" class="flex-1 flex flex-col">
+    <!-- Header Corporativo con Identidad CapTax-A -->
+    <header class="bg-white text-[#111413] shadow-sm border-b-2 border-brand-600">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div class="flex items-center gap-4">
+          <!-- Contenedor del Logo Oficial CapTax-A -->
+          <div id="header-logo-slot" class="shrink-0 bg-white px-2.5 py-1.5 rounded-2xl border border-neutral-200 shadow-xs"></div>
+
+          <div class="border-l border-neutral-200 pl-4">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-xs font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-brand-100 text-brand-700 border border-brand-600/20">
+                Trazabilidad QR & Fichas Técnicas
+              </span>
+              <label for="logo-upload-input" title="Opcional: subir imagen de logo personalizada"
+                class="text-[11px] font-semibold text-[#5C6661] hover:text-brand-600 underline cursor-pointer">
+                Cambiar imagen logo
+              </label>
+              <input id="logo-upload-input" type="file" accept="image/*" class="hidden" onchange="handleCustomLogoUpload(event)" />
+            </div>
+            <p class="text-xs sm:text-sm text-[#5C6661] mt-1">
+              Preformas 45mm (90g/96g/104g) · Tapas 28mm (1881/1816), 38mm y 45mm · Asas 45mm · Galoneras 4L y 5L
+            </p>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2.5">
+          <button type="button" onclick="resetFormForNew()" class="px-4 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-[#111413] text-xs sm:text-sm font-bold border border-neutral-300 transition cursor-pointer">
+            + Nuevo Lote / QR
+          </button>
+          <button type="button" onclick="openScanPreview(currentRecord)" class="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs sm:text-sm font-bold shadow-md shadow-brand-600/20 transition flex items-center gap-2 cursor-pointer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+            </svg>
+            Simular Escaneo Móvil
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Contenedor Principal -->
+    <main class="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex-1">
+      <!-- Banner informativo de funcionamiento de URL pública para GitHub Pages -->
+      <div class="mb-6 bg-brand-50 border border-brand-600/25 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div class="flex items-start gap-3">
+          <div class="p-2 rounded-xl bg-brand-600 text-white shrink-0 mt-0.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+          </div>
+          <div class="text-xs sm:text-sm text-[#111413]">
+            <p class="font-bold text-brand-800">Listo para GitHub Pages y Escaneo Real en Planta</p>
+            <p class="text-[#5C6661] mt-0.5">
+              Al subir este archivo como <span class="font-mono bg-white border border-brand-600/20 px-1.5 py-0.5 rounded text-brand-700 font-semibold">index.html</span> a GitHub Pages, cada QR incrusta los datos codificados en el enlace (<span class="font-mono">#qr=...</span>). Cualquier celular que lo escanee verá el logo de <strong>CapTax-A</strong>, el estado en producción y la ficha técnica al instante.
+            </p>
+          </div>
+        </div>
+        <div class="shrink-0">
+          <label class="block text-[11px] font-bold uppercase text-brand-800 mb-1">URL Base del QR (Opcional)</label>
+          <input id="custom-base-url" type="text" placeholder="Automática (URL actual)"
+            onchange="regenerateCurrentQR()"
+            class="w-full md:w-64 text-xs font-mono bg-white border border-brand-600/30 rounded-xl px-3 py-2 text-[#111413] focus:outline-none focus:ring-2 focus:ring-brand-600" />
+        </div>
+      </div>
+
+      <!-- Grid Principal: Izquierda Formulario (7 cols) | Derecha Etiqueta & QR (5 cols) -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+        <!-- COLUMNA IZQUIERDA: FORMULARIO DE REGISTRO DE PRODUCTO, PRODUCCIÓN Y FICHA TÉCNICA -->
+        <section class="lg:col-span-7 bg-white rounded-3xl shadow-sm border border-neutral-200/90 overflow-hidden">
+          <div class="px-6 py-4 bg-neutral-50 border-b border-neutral-200 flex items-center justify-between gap-2">
+            <div>
+              <h2 class="text-base sm:text-lg font-bold text-[#111413]">1. Registro de Producto y Orden en Producción</h2>
+              <p class="text-xs text-[#5C6661]">Selecciona un producto estándar de CapTax-A o personaliza los datos del lote.</p>
+            </div>
+            <span id="form-mode-badge" class="text-xs font-bold px-3 py-1 rounded-full bg-brand-100 text-brand-800 shrink-0">
+              Lote Activo
+            </span>
+          </div>
+
+          <form id="product-form" class="p-6 space-y-6" onsubmit="handleFormSubmit(event)">
+            <!-- Selector Rápido del Catálogo Oficial CapTax-A -->
+            <div class="bg-brand-50/90 border border-brand-600/30 rounded-2xl p-4">
+              <label for="catalog-preset" class="block text-xs font-extrabold uppercase tracking-wider text-brand-800 mb-1.5">
+                ⚡ Selección Rápida de Producto Oficial CapTax-A
+              </label>
+              <select id="catalog-preset" onchange="applyCatalogPreset(this.value)"
+                class="w-full rounded-xl border-2 border-brand-600/40 bg-white px-3.5 py-2.5 text-sm font-bold text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none">
+                <option value="">-- Seleccionar del catálogo estándar CapTax-A (Autocompletar) --</option>
+                <optgroup label="Preformas Cuello 45mm (PET)">
+                  <option value="PRE-90-45">Preforma 90g — Cuello 45mm (PET)</option>
+                  <option value="PRE-96-45">Preforma 96g — Cuello 45mm (PET)</option>
+                  <option value="PRE-104-45">Preforma 104g — Cuello 45mm (PET)</option>
+                </optgroup>
+                <optgroup label="Tapas (28mm, 38mm y 45mm)">
+                  <option value="TAP-28-1881">Tapa 28mm 1881 (Short)</option>
+                  <option value="TAP-28-1816">Tapa 28mm 1816 (Long)</option>
+                  <option value="TAP-38">Tapa 38mm</option>
+                  <option value="TAP-45">Tapa 45mm</option>
+                </optgroup>
+                <optgroup label="Asas">
+                  <option value="ASA-45">Asa 45mm</option>
+                </optgroup>
+                <optgroup label="Galoneras Industriales (4L y 5L)">
+                  <option value="GAL-CUAD-4L">Galonera Cuadrada 4 Litros (4L)</option>
+                  <option value="GAL-RED-5L">Galonera Redonda 5 Litros (5L)</option>
+                  <option value="GAL-CUAD-5L">Galonera Cuadrada 5 Litros (5L)</option>
+                </optgroup>
+                <optgroup label="Personalizado">
+                  <option value="CUSTOM">Otro / Producto Personalizado</option>
+                </optgroup>
+              </select>
+            </div>
+
+            <!-- Bloque A: Especificación del Producto CapTax-A -->
+            <div>
+              <h3 class="text-xs font-extrabold uppercase tracking-wider text-brand-700 mb-3 flex items-center gap-2">
+                <span class="w-5 h-5 rounded-lg bg-brand-600 text-white inline-flex items-center justify-center text-[11px]">A</span>
+                Identificación del Producto
+              </h3>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Categoría *</label>
+                  <select id="categoria" required
+                    class="w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm font-medium text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none">
+                    <option value="Preforma">Preforma</option>
+                    <option value="Tapa">Tapa</option>
+                    <option value="Asa">Asa</option>
+                    <option value="Galonera">Galonera</option>
+                    <option value="Envase">Envase</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Cuello / Medida *</label>
+                  <select id="cuello" required
+                    class="w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm font-medium text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none">
+                    <option value="45mm">45mm</option>
+                    <option value="28mm 1881 (Short)">28mm 1881 (Short)</option>
+                    <option value="28mm 1816 (Long)">28mm 1816 (Long)</option>
+                    <option value="38mm">38mm</option>
+                    <option value="38mm / 45mm">38mm / 45mm</option>
+                    <option value="N/A">N/A</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">SKU / Código Interno *</label>
+                  <input id="sku" type="text" required placeholder="Ej. PRE-45-96G"
+                    class="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm font-mono font-bold text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none" />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Peso / Capacidad *</label>
+                  <input id="peso" type="text" required placeholder="Ej. 96g · 4L · 5L"
+                    class="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm font-semibold text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none" />
+                </div>
+
+                <div class="sm:col-span-2">
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Nombre / Descripción del Producto *</label>
+                  <input id="nombre" type="text" required placeholder="Ej. Preforma PET 96g Cuello 45mm"
+                    class="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none" />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Resina / Material *</label>
+                  <select id="material" required
+                    class="w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none">
+                    <option value="PET (Tereftalato de Polietileno)">PET (Tereftalato de Polietileno)</option>
+                    <option value="HDPE (Polietileno Alta Densidad)">HDPE (Polietileno Alta Densidad)</option>
+                    <option value="PP (Polipropileno)">PP (Polipropileno)</option>
+                    <option value="HDPE / PP">HDPE / PP</option>
+                    <option value="LDPE (Polietileno Baja Densidad)">LDPE (Polietileno Baja Densidad)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Color / Pigmento *</label>
+                  <input id="color" type="text" required placeholder="Cristal / Verde CapTax / Blanco"
+                    class="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none" />
+                </div>
+              </div>
+            </div>
+
+            <hr class="border-neutral-200" />
+
+            <!-- Bloque B: Datos en Producción & Logística -->
+            <div>
+              <h3 class="text-xs font-extrabold uppercase tracking-wider text-brand-700 mb-3 flex items-center gap-2">
+                <span class="w-5 h-5 rounded-lg bg-brand-600 text-white inline-flex items-center justify-center text-[11px]">B</span>
+                Datos en Producción y Trazabilidad Logística
+              </h3>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Orden Producción (OP) *</label>
+                  <input id="op" type="text" required placeholder="OP-2026-501"
+                    class="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm font-mono text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none" />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Número de Lote *</label>
+                  <input id="lote" type="text" required placeholder="LOTE-261119-01"
+                    class="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm font-mono text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none" />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Estado en Producción *</label>
+                  <select id="estado" required
+                    class="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2.5 text-sm font-semibold text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none">
+                    <option value="En Producción">En Producción</option>
+                    <option value="En Control de Calidad">En Control de Calidad</option>
+                    <option value="Liberado / Aprobado">Liberado / Aprobado</option>
+                    <option value="En Almacén">En Almacén</option>
+                    <option value="Despachado">Despachado</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Fecha Fabricación *</label>
+                  <input id="fecha" type="date" required
+                    class="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none" />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Turno *</label>
+                  <select id="turno" required
+                    class="w-full rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none">
+                    <option value="Mañana">Mañana</option>
+                    <option value="Tarde">Tarde</option>
+                    <option value="Noche">Noche</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Máquina / Línea / Cavidades *</label>
+                  <input id="maquina" type="text" required placeholder="INY-PET-02 / 24 Cav"
+                    class="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm font-mono text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none" />
+                </div>
+
+                <div class="sm:col-span-3">
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Cantidad (Unidades / Cajas / Bolsones) *</label>
+                  <input id="cantidad" type="text" required placeholder="Ej. 1,200 unidades / Octabin Gaylord"
+                    class="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none" />
+                </div>
+              </div>
+            </div>
+
+            <hr class="border-neutral-200" />
+
+            <!-- Bloque C: Ficha Técnica -->
+            <div>
+              <h3 class="text-xs font-extrabold uppercase tracking-wider text-brand-700 mb-3 flex items-center gap-2">
+                <span class="w-5 h-5 rounded-lg bg-brand-600 text-white inline-flex items-center justify-center text-[11px]">C</span>
+                Especificaciones de Ficha Técnica
+              </h3>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Dimensiones y Tolerancias *</label>
+                  <input id="dimensiones" type="text" required placeholder="Cuello Ø 45.0 ± 0.25 mm | Largo: 148.0 mm"
+                    class="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none" />
+                </div>
+
+                <div>
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Código Ficha Técnica / Norma *</label>
+                  <input id="fichaCodigo" type="text" required placeholder="FT-CTX-PRE-45-96 (Rev. 05)"
+                    class="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm font-mono text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none" />
+                </div>
+
+                <div class="sm:col-span-2">
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Torque / Resistencia / Ensayos *</label>
+                  <input id="ensayos" type="text" required placeholder="IV 0.82 dl/g · Prueba de estanqueidad y caída 1.2m aprobada"
+                    class="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none" />
+                </div>
+
+                <div class="sm:col-span-2">
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">URL Opcional de Ficha Técnica PDF Externa</label>
+                  <input id="fichaUrl" type="url" placeholder="https://captax-a.com/fichas/FT-CTX-PRE-45-96.pdf"
+                    class="w-full rounded-xl border border-neutral-300 px-3.5 py-2.5 text-sm text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none" />
+                </div>
+
+                <div class="sm:col-span-2">
+                  <label class="block text-xs font-semibold text-neutral-700 mb-1.5">Observaciones de Calidad</label>
+                  <textarea id="observaciones" rows="2" placeholder="Resina virgen grado alimenticio. Almacenar en ambiente seco y bajo techo."
+                    class="w-full rounded-xl border border-neutral-300 px-3.5 py-2 text-sm text-[#111413] focus:border-brand-600 focus:ring-2 focus:ring-brand-600/20 outline-none"></textarea>
+                </div>
+              </div>
+            </div>
+
+            <!-- Botón Principal de Generación -->
+            <div class="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-3">
+              <button type="submit"
+                class="w-full sm:w-auto px-6 py-3 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white font-bold text-sm shadow-lg shadow-brand-600/25 transition flex items-center justify-center gap-2 cursor-pointer">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/>
+                </svg>
+                Generar / Actualizar Código QR
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <!-- COLUMNA DERECHA: ETIQUETA LOGÍSTICA IMPRIMIBLE Y CÓDIGO QR -->
+        <aside class="lg:col-span-5 space-y-6 lg:sticky lg:top-6">
+          <div class="bg-white rounded-3xl shadow-sm border border-neutral-200/90 overflow-hidden">
+            <div class="px-6 py-4 bg-neutral-50 border-b border-neutral-200 flex items-center justify-between">
+              <div>
+                <h2 class="text-base sm:text-lg font-bold text-[#111413]">2. Etiqueta QR Lista para Imprimir</h2>
+                <p class="text-xs text-[#5C6661]">Escanea con tu celular o descarga la imagen PNG.</p>
+              </div>
+              <span class="text-[11px] font-mono font-bold px-2.5 py-1 rounded-lg bg-brand-100 text-brand-800 border border-brand-600/20">
+                QR ACTIVO
+              </span>
+            </div>
+
+            <div class="p-6">
+              <!-- Tarjeta de Etiqueta Física (Esta área es la que se imprime limpia con @media print) -->
+              <div id="printable-label-area" class="border-2 border-[#111413] rounded-2xl p-4 bg-white shadow-inner">
+                <!-- Encabezado de Etiqueta con Logo CapTax-A -->
+                <div class="flex items-center justify-between border-b-2 border-[#111413] pb-2.5 mb-3">
+                  <div id="label-logo-slot" class="shrink-0"></div>
+                  <div class="text-right">
+                    <span id="lbl-categoria" class="inline-block text-[11px] font-extrabold uppercase px-2.5 py-0.5 rounded bg-brand-600 text-white">
+                      PREFORMA
+                    </span>
+                    <span id="lbl-cuello-peso" class="block text-xs font-mono font-bold text-[#111413] mt-1">
+                      45mm · 96g
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Cuerpo central: QR + Datos clave -->
+                <div class="grid grid-cols-12 gap-3 items-center">
+                  <!-- Zona QR con margen blanco obligatorio -->
+                  <div class="col-span-5 bg-white p-2 rounded-xl border border-neutral-300 flex items-center justify-center">
+                    <div id="qrcode-container" class="w-full flex justify-center"></div>
+                  </div>
+
+                  <!-- Metadatos legibles en almacén -->
+                  <div class="col-span-7 space-y-1.5 text-left">
+                    <div>
+                      <span class="text-[9px] font-mono font-bold uppercase text-brand-700 block" id="lbl-sku">SKU: PRE-45-96G</span>
+                      <p id="lbl-nombre" class="text-xs font-extrabold text-[#111413] leading-snug line-clamp-2">
+                        Preforma PET 96g Cuello 45mm
+                      </p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-1.5 pt-0.5">
+                      <div>
+                        <span class="text-[9px] font-bold uppercase text-[#5C6661] block">Lote</span>
+                        <span id="lbl-lote" class="text-xs font-mono font-bold text-[#111413]">LOTE-261119-01</span>
+                      </div>
+                      <div>
+                        <span class="text-[9px] font-bold uppercase text-[#5C6661] block">Orden (OP)</span>
+                        <span id="lbl-op" class="text-xs font-mono font-bold text-[#111413]">OP-2026-501</span>
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-1.5">
+                      <div>
+                        <span class="text-[9px] font-bold uppercase text-[#5C6661] block">Material</span>
+                        <span id="lbl-mat" class="text-[11px] font-semibold text-neutral-800">PET</span>
+                      </div>
+                      <div>
+                        <span class="text-[9px] font-bold uppercase text-[#5C6661] block">Fecha</span>
+                        <span id="lbl-fecha" class="text-[11px] font-mono font-semibold text-neutral-800">2026-11-19</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Pie de Etiqueta -->
+                <div class="mt-3 pt-2 border-t border-neutral-300 flex items-center justify-between text-[10px]">
+                  <span class="font-mono font-semibold text-[#5C6661]" id="lbl-ficha">FT-CTX-PRE-45-96</span>
+                  <span id="lbl-estado" class="font-extrabold uppercase px-2 py-0.5 rounded bg-brand-100 text-brand-800">
+                    En Producción
+                  </span>
+                </div>
+              </div>
+
+              <!-- URL codificada + Copiar enlace -->
+              <div class="mt-4">
+                <label class="block text-[11px] font-bold uppercase text-[#5C6661] mb-1">Enlace codificado dentro del QR</label>
+                <div class="flex items-center gap-2">
+                  <input id="encoded-url-display" type="text" readonly
+                    class="w-full text-[11px] font-mono bg-neutral-100 border border-neutral-200 rounded-xl px-3 py-2 text-neutral-600 select-all focus:outline-none" />
+                  <button type="button" onclick="copyEncodedUrl()" title="Copiar URL del QR"
+                    class="shrink-0 px-3 py-2 rounded-xl bg-neutral-200 hover:bg-neutral-300 text-[#111413] text-xs font-semibold transition cursor-pointer">
+                    Copiar
+                  </button>
+                </div>
+              </div>
+
+              <!-- Botones de Impresión, Descarga y Simulación -->
+              <div class="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button type="button" onclick="window.print()"
+                  class="px-4 py-3 rounded-2xl bg-[#111413] hover:bg-neutral-800 text-white text-xs sm:text-sm font-bold shadow transition flex items-center justify-center gap-2 cursor-pointer">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
+                  </svg>
+                  Imprimir Etiqueta
+                </button>
+
+                <button type="button" onclick="downloadQRPng()"
+                  class="px-4 py-3 rounded-2xl bg-brand-600 hover:bg-brand-700 text-white text-xs sm:text-sm font-bold shadow transition flex items-center justify-center gap-2 cursor-pointer">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                  </svg>
+                  Descargar QR (PNG)
+                </button>
+
+                <button type="button" onclick="openScanPreview(currentRecord)"
+                  class="sm:col-span-2 px-4 py-3 rounded-2xl bg-brand-50 hover:bg-brand-100 text-brand-800 border border-brand-600/30 text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer">
+                  <svg class="w-4 h-4 text-brand-600" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                  </svg>
+                  Simular Escaneo Móvil (Vista Operario/Cliente)
+                </button>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <!-- SECCIÓN INFERIOR: HISTORIAL DE LOTES REGISTRADOS EN CAPTAX-A -->
+      <section class="mt-8 bg-white rounded-3xl shadow-sm border border-neutral-200/90 overflow-hidden">
+        <div class="px-6 py-4 bg-neutral-50 border-b border-neutral-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h2 class="text-base sm:text-lg font-bold text-[#111413]">3. Lotes y Códigos QR Registrados en CapTax-A</h2>
+            <p class="text-xs text-[#5C6661]">Selecciona cualquier lote para cargar su etiqueta QR, editar su estado o simular el escaneo.</p>
+          </div>
+          <span id="records-count" class="text-xs font-bold px-3 py-1 rounded-full bg-brand-100 text-brand-800 self-start sm:self-auto">
+            0 registros
+          </span>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse">
+            <thead>
+              <tr class="border-b border-neutral-200 text-[11px] font-extrabold uppercase tracking-wider text-[#5C6661] bg-neutral-50/70">
+                <th class="py-3.5 px-4">Lote / OP</th>
+                <th class="py-3.5 px-4">Producto & SKU</th>
+                <th class="py-3.5 px-4">Cuello / Peso-Cap.</th>
+                <th class="py-3.5 px-4">Estado Producción</th>
+                <th class="py-3.5 px-4">Ficha Técnica</th>
+                <th class="py-3.5 px-4 text-right">Acciones QR</th>
+              </tr>
+            </thead>
+            <tbody id="records-table-body" class="divide-y divide-neutral-100 text-sm">
+              <!-- Filas generadas dinámicamente -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ===================================================================== -->
+  <!-- MODAL: FICHA TÉCNICA DIGITAL COMPLETA (Accesible desde el QR escaneado) -->
+  <!-- ===================================================================== -->
+  <div id="tech-sheet-modal" class="hidden fixed inset-0 z-50 bg-[#111413]/75 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-xl rounded-3xl shadow-2xl border border-neutral-200 overflow-hidden max-h-[90vh] flex flex-col">
+      <div class="px-6 py-4 bg-brand-700 text-white flex items-center justify-between">
+        <div>
+          <span class="text-[10px] font-bold uppercase tracking-widest text-brand-100">Documento Técnico Oficial CapTax-A</span>
+          <h3 id="modal-ts-title" class="text-base sm:text-lg font-extrabold">Ficha Técnica</h3>
+        </div>
+        <button onclick="closeTechSheetModal()" class="p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition cursor-pointer">
+          ✕
+        </button>
+      </div>
+      <div id="modal-ts-body" class="p-6 overflow-y-auto space-y-4 text-sm text-neutral-700">
+        <!-- Contenido dinámico -->
+      </div>
+      <div class="px-6 py-3.5 bg-neutral-50 border-t border-neutral-200 flex items-center justify-between gap-3">
+        <button onclick="downloadTechSheetTxt()" class="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold transition cursor-pointer">
+          Descargar Ficha (.TXT)
+        </button>
+        <button onclick="closeTechSheetModal()" class="px-4 py-2 rounded-xl bg-neutral-200 hover:bg-neutral-300 text-[#111413] text-xs font-bold transition cursor-pointer">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // LOGOTIPO VECTORIAL FIEL DE CAPTAX-A (Círculo verde degradado + aro negro/gris + tipografía CapTax-A)
+    // =========================================================================
+    let customLogoDataUrl = null;
+
+    function getCapTaxLogoHTML(size = 'md') {
+      if (customLogoDataUrl) {
+        const imgHeight = size === 'sm' ? 'h-9' : size === 'lg' ? 'h-14' : 'h-12';
+        return `<img src="${customLogoDataUrl}" alt="CapTax-A Logo" class="${imgHeight} w-auto object-contain" />`;
+      }
+
+      const dimensions = size === 'sm'
+        ? 'width="96" height="46"'
+        : size === 'lg'
+          ? 'width="148" height="72"'
+          : 'width="124" height="60"';
+
+      const uid = 'ctxGrad_' + size + '_' + Math.floor(Math.random() * 100000);
+
+      return `
+        <svg ${dimensions} viewBox="0 0 220 112" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Logo Oficial CapTax-A">
+          <defs>
+            <linearGradient id="${uid}" x1="72" y1="14" x2="146" y2="74" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#9ED8B5"/>
+              <stop offset="35%" stop-color="#2E9E5B"/>
+              <stop offset="75%" stop-color="#007A33"/>
+              <stop offset="100%" stop-color="#005725"/>
+            </linearGradient>
+          </defs>
+          <!-- Aro exterior estilizado negro y gris metálico tipo pincelada -->
+          <path d="M110 6 C133 6 151 22 151 43 C151 58 141 71 127 76" stroke="#111413" stroke-width="3.2" stroke-linecap="round"/>
+          <path d="M110 9 C87 9 69 24 69 44 C69 64 87 79 110 79 C125 79 138 72 145 61" stroke="#5C6661" stroke-width="2.2" stroke-linecap="round"/>
+          <path d="M123 73 C133 69 141 61 145 52" stroke="#111413" stroke-width="1.6" stroke-linecap="round"/>
+          <!-- Esfera verde corporativa con brillo superior -->
+          <circle cx="110" cy="44" r="31" fill="url(#${uid})"/>
+          <ellipse cx="97" cy="31" rx="13" ry="8" transform="rotate(-32 97 31)" fill="#FFFFFF" fill-opacity="0.24"/>
+          <!-- Tipografía CapTax- en negro carbón bold itálico + A en verde #007A33 -->
+          <text x="10" y="103" font-family="Inter, Arial, sans-serif" font-weight="800" font-style="italic" font-size="31" letter-spacing="-0.8" fill="#111413">CapTax-</text>
+          <path d="M174 106 L193 74 L199 74 L196 105 L190 105 L191 96 L179 96 L172 108 L167 108 Z M182 91 L191 91 L193 80 Z" fill="#007A33"/>
+        </svg>
+      `;
+    }
+
+    function renderBrandLogos() {
+      const headerSlot = document.getElementById('header-logo-slot');
+      const labelSlot = document.getElementById('label-logo-slot');
+      if (headerSlot) headerSlot.innerHTML = getCapTaxLogoHTML('md');
+      if (labelSlot) labelSlot.innerHTML = getCapTaxLogoHTML('sm');
+    }
+
+    function handleCustomLogoUpload(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        customLogoDataUrl = e.target.result;
+        renderBrandLogos();
+        showToast('Imagen de logo personalizada aplicada.', 'success');
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // =========================================================================
+    // CATÁLOGO OFICIAL DE PRODUCTOS CAPTAX-A (11 PRODUCTOS REALES + PERSONALIZADO)
+    // =========================================================================
+    const CAPTAX_CATALOG = {
+      'PRE-90-45': {
+        categoria: 'Preforma',
+        cuello: '45mm',
+        sku: 'PRE-45-90G',
+        peso: '90g',
+        nombre: 'Preforma PET 90g — Cuello 45mm',
+        material: 'PET (Tereftalato de Polietileno)',
+        color: 'Cristal Transparente',
+        dimensiones: 'Cuello Ø 45.0 ± 0.25 mm | Largo: 142.0 ± 0.3 mm | Espesor: 4.10 mm',
+        fichaCodigo: 'FT-CTX-PRE-45-90 (Rev. 03)',
+        ensayos: 'IV 0.82 ± 0.02 dl/g · Acetaldehído < 3 ppm · Ideal botellón/galonera 4L-5L',
+        observaciones: 'Resina PET grado alimenticio FDA. Control de cristalinidad y concentricidad verificado.'
+      },
+      'PRE-96-45': {
+        categoria: 'Preforma',
+        cuello: '45mm',
+        sku: 'PRE-45-96G',
+        peso: '96g',
+        nombre: 'Preforma PET 96g — Cuello 45mm',
+        material: 'PET (Tereftalato de Polietileno)',
+        color: 'Cristal Transparente',
+        dimensiones: 'Cuello Ø 45.0 ± 0.25 mm | Largo: 148.5 ± 0.3 mm | Espesor: 4.35 mm',
+        fichaCodigo: 'FT-CTX-PRE-45-96 (Rev. 05)',
+        ensayos: 'IV 0.82 ± 0.02 dl/g · Alta resistencia mecánica al soplado de 5 Litros',
+        observaciones: 'Resina virgen grado alimenticio. Almacenar en ambiente seco y bajo techo (< 35°C).'
+      },
+      'PRE-104-45': {
+        categoria: 'Preforma',
+        cuello: '45mm',
+        sku: 'PRE-45-104G',
+        peso: '104g',
+        nombre: 'Preforma PET 104g — Cuello 45mm',
+        material: 'PET (Tereftalato de Polietileno)',
+        color: 'Cristal / Azul',
+        dimensiones: 'Cuello Ø 45.0 ± 0.25 mm | Largo: 156.0 ± 0.3 mm | Espesor: 4.65 mm',
+        fichaCodigo: 'FT-CTX-PRE-45-104 (Rev. 04)',
+        ensayos: 'IV 0.84 dl/g · Pared reforzada para envases industriales y retornables',
+        observaciones: 'Máxima rigidez estructural tras proceso de biorientación.'
+      },
+      'TAP-28-1881': {
+        categoria: 'Tapa',
+        cuello: '28mm 1881 (Short)',
+        sku: 'TAP-28-1881',
+        peso: '2.65g',
+        nombre: 'Tapa Rosca 28mm PCO 1881 (Short)',
+        material: 'HDPE / PP',
+        color: 'Verde CapTax / Blanco',
+        dimensiones: 'Rosca 28mm PCO 1881 Short | Ø Ext: 30.6 ± 0.15 mm | Alt: 16.8 mm',
+        fichaCodigo: 'FT-CTX-TAP-28-1881 (Rev. 06)',
+        ensayos: 'Torque de aplicación: 12-16 lb-in · Retención de presión hasta 4.2 vol CO2',
+        observaciones: 'Banda de seguridad pilfer-proof precortada. Sello hermético sin liner.'
+      },
+      'TAP-28-1816': {
+        categoria: 'Tapa',
+        cuello: '28mm 1816 (Long)',
+        sku: 'TAP-28-1816',
+        peso: '3.40g',
+        nombre: 'Tapa Rosca 28mm PCO 1816 (Long)',
+        material: 'HDPE / PP',
+        color: 'Blanco / Azul',
+        dimensiones: 'Rosca 28mm PCO 1816 Long | Ø Ext: 30.8 ± 0.15 mm | Alt: 21.2 mm',
+        fichaCodigo: 'FT-CTX-TAP-28-1816 (Rev. 04)',
+        ensayos: 'Torque de apertura: 10-15 lb-in · Prueba de estanqueidad invertida 100%',
+        observaciones: 'Compatible con botellas de cuello largo PCO 1816 para bebidas, aceites y jugos.'
+      },
+      'TAP-38': {
+        categoria: 'Tapa',
+        cuello: '38mm',
+        sku: 'TAP-38-STD',
+        peso: '5.50g',
+        nombre: 'Tapa Rosca 38mm con Precinto de Seguridad',
+        material: 'HDPE / PP',
+        color: 'Blanco / Verde CapTax',
+        dimensiones: 'Rosca Ø 38.0 ± 0.20 mm | Alt: 20.5 mm | Paso: 3.18 mm',
+        fichaCodigo: 'FT-CTX-TAP-038 (Rev. 05)',
+        ensayos: 'Torque cierre: 18-24 lb-in · Prueba de hermeticidad y sello de inducción',
+        observaciones: 'Diseñada para galoneras, lácteos, jugos y productos químicos.'
+      },
+      'TAP-45': {
+        categoria: 'Tapa',
+        cuello: '45mm',
+        sku: 'TAP-45-STD',
+        peso: '7.80g',
+        nombre: 'Tapa Rosca 45mm Industrial',
+        material: 'HDPE / PP',
+        color: 'Verde CapTax / Natural',
+        dimensiones: 'Rosca Ø 45.0 ± 0.20 mm | Alt: 22.8 mm | Precinto de inviolabilidad',
+        fichaCodigo: 'FT-CTX-TAP-045 (Rev. 04)',
+        ensayos: 'Torque cierre: 22-28 lb-in · Resistencia química y prueba de caída 1.2m',
+        observaciones: 'Acoplamiento perfecto con preformas y galoneras de cuello 45mm CapTax-A.'
+      },
+      'ASA-45': {
+        categoria: 'Asa',
+        cuello: '45mm',
+        sku: 'ASA-45-ERG',
+        peso: '11.50g',
+        nombre: 'Asa Ergonómica Encaje Cuello 45mm',
+        material: 'HDPE / PP',
+        color: 'Verde CapTax / Azul / Blanco',
+        dimensiones: 'Aro interno Ø 45.2 ± 0.15 mm | Longitud agarre: 118 mm',
+        fichaCodigo: 'FT-CTX-ASA-045 (Rev. 03)',
+        ensayos: 'Ensayo de tracción vertical > 25 kgf sin deformación ni desprendimiento',
+        observaciones: 'Diseño anatómico antideslizante para transporte seguro de envases de 4L y 5L.'
+      },
+      'GAL-CUAD-4L': {
+        categoria: 'Galonera',
+        cuello: '38mm / 45mm',
+        sku: 'GAL-CUA-4L',
+        peso: '4L (135g)',
+        nombre: 'Galonera Cuadrada de 4 Litros',
+        material: 'HDPE (Polietileno Alta Densidad)',
+        color: 'Natural Translúcido / Blanco',
+        dimensiones: 'Capacidad nominal: 4.0 L (Rebose 4.18 L) | Base: 152 x 152 mm | Alt: 285 mm',
+        fichaCodigo: 'FT-CTX-GAL-C4L (Rev. 07)',
+        ensayos: 'Prueba de caída 1.2m llena · Apilamiento estático 4 niveles · Estanqueidad 100%',
+        observaciones: 'Geometría cuadrada optimizada para máxima eficiencia en palletizado y transporte.'
+      },
+      'GAL-RED-5L': {
+        categoria: 'Galonera',
+        cuello: '38mm / 45mm',
+        sku: 'GAL-RED-5L',
+        peso: '5L (155g)',
+        nombre: 'Galonera Redonda de 5 Litros',
+        material: 'HDPE (Polietileno Alta Densidad)',
+        color: 'Natural Translúcido / Blanco',
+        dimensiones: 'Capacidad nominal: 5.0 L (Rebose 5.25 L) | Ø Cuerpo: 176 mm | Alt: 318 mm',
+        fichaCodigo: 'FT-CTX-GAL-R5L (Rev. 05)',
+        ensayos: 'Resistencia a presión interna y caída 1.2m · Resina HDPE alto peso molecular',
+        observaciones: 'Ideal para líquidos alimenticios, desinfectantes, agroquímicos y detergentes.'
+      },
+      'GAL-CUAD-5L': {
+        categoria: 'Galonera',
+        cuello: '38mm / 45mm',
+        sku: 'GAL-CUA-5L',
+        peso: '5L (165g)',
+        nombre: 'Galonera Cuadrada de 5 Litros',
+        material: 'HDPE (Polietileno Alta Densidad)',
+        color: 'Natural Translúcido / Blanco',
+        dimensiones: 'Capacidad nominal: 5.0 L (Rebose 5.25 L) | Base: 165 x 165 mm | Alt: 310 mm',
+        fichaCodigo: 'FT-CTX-GAL-C5L (Rev. 06)',
+        ensayos: 'Prueba de caída 1.2m · Resistencia química y apilamiento en almacén logístico',
+        observaciones: 'Asa integrada de alta resistencia y zona frontal plana para etiquetado QR.'
+      }
+    };
+
+    // =========================================================================
+    // ESTADO GLOBAL Y REGISTROS PRECARGADOS DE EJEMPLO CAPTAX-A
+    // =========================================================================
+    const STORAGE_KEY = 'captax_a_qr_records_v2';
+
+    const DEFAULT_RECORDS = [
+      {
+        id: 'CTX-101',
+        categoria: 'Preforma',
+        cuello: '45mm',
+        sku: 'PRE-45-96G',
+        peso: '96g',
+        nombre: 'Preforma PET 96g — Cuello 45mm',
+        material: 'PET (Tereftalato de Polietileno)',
+        color: 'Cristal Transparente',
+        op: 'OP-2026-501',
+        lote: 'LOTE-261119-01',
+        estado: 'En Producción',
+        fecha: '2026-11-19',
+        turno: 'Mañana',
+        maquina: 'INY-PET-02 / 24 Cav',
+        cantidad: '3,600 unidades / Octabin Gaylord',
+        dimensiones: 'Cuello Ø 45.0 ± 0.25 mm | Largo: 148.5 ± 0.3 mm | Espesor: 4.35 mm',
+        fichaCodigo: 'FT-CTX-PRE-45-96 (Rev. 05)',
+        ensayos: 'IV 0.82 ± 0.02 dl/g · Alta resistencia mecánica al soplado de 5 Litros',
+        fichaUrl: '',
+        observaciones: 'Resina virgen grado alimenticio. Almacenar en ambiente seco y bajo techo (< 35°C).'
+      },
+      {
+        id: 'CTX-102',
+        categoria: 'Tapa',
+        cuello: '28mm 1881 (Short)',
+        sku: 'TAP-28-1881',
+        peso: '2.65g',
+        nombre: 'Tapa Rosca 28mm PCO 1881 (Short)',
+        material: 'HDPE / PP',
+        color: 'Verde CapTax',
+        op: 'OP-2026-498',
+        lote: 'LOTE-261119-02',
+        estado: 'Liberado / Aprobado',
+        fecha: '2026-11-19',
+        turno: 'Mañana',
+        maquina: 'INY-TAP-04 / 32 Cav',
+        cantidad: '5,000 unidades / Caja Corrugada',
+        dimensiones: 'Rosca 28mm PCO 1881 Short | Ø Ext: 30.6 ± 0.15 mm | Alt: 16.8 mm',
+        fichaCodigo: 'FT-CTX-TAP-28-1881 (Rev. 06)',
+        ensayos: 'Torque de aplicación: 12-16 lb-in · Retención de presión hasta 4.2 vol CO2',
+        fichaUrl: '',
+        observaciones: 'Banda de seguridad pilfer-proof precortada. Sello hermético verificado en laboratorio.'
+      },
+      {
+        id: 'CTX-103',
+        categoria: 'Galonera',
+        cuello: '38mm / 45mm',
+        sku: 'GAL-CUA-5L',
+        peso: '5L (165g)',
+        nombre: 'Galonera Cuadrada de 5 Litros',
+        material: 'HDPE (Polietileno Alta Densidad)',
+        color: 'Natural Translúcido',
+        op: 'OP-2026-495',
+        lote: 'LOTE-261118-04',
+        estado: 'En Control de Calidad',
+        fecha: '2026-11-18',
+        turno: 'Tarde',
+        maquina: 'SOP-GAL-01 / Doble Estación',
+        cantidad: '40 unidades / Bolsón Termoencogible',
+        dimensiones: 'Capacidad nominal: 5.0 L (Rebose 5.25 L) | Base: 165 x 165 mm | Alt: 310 mm',
+        fichaCodigo: 'FT-CTX-GAL-C5L (Rev. 06)',
+        ensayos: 'Prueba de caída 1.2m · Resistencia química y apilamiento en almacén logístico',
+        fichaUrl: '',
+        observaciones: 'Asa integrada de alta resistencia y zona frontal plana para etiquetado QR.'
+      }
+    ];
+
+    let records = [];
+    let currentRecord = null;
+    let activeModalRecord = null;
+
+    // =========================================================================
+    // UTILIDADES DE CODIFICACIÓN URL (Para que el QR lleve los datos autocontenidos)
+    // =========================================================================
+    function encodePayloadToBase64(obj) {
+      const compact = {
+        c: obj.categoria,
+        u: obj.cuello,
+        s: obj.sku,
+        n: obj.nombre,
+        m: obj.material,
+        p: obj.peso,
+        cl: obj.color,
+        o: obj.op,
+        l: obj.lote,
+        e: obj.estado,
+        f: obj.fecha,
+        t: obj.turno,
+        mq: obj.maquina,
+        q: obj.cantidad,
+        d: obj.dimensiones,
+        fc: obj.fichaCodigo,
+        en: obj.ensayos || '',
+        fu: obj.fichaUrl || '',
+        ob: obj.observaciones || ''
+      };
+      const jsonStr = JSON.stringify(compact);
+      return btoa(unescape(encodeURIComponent(jsonStr)));
+    }
+
+    function decodePayloadFromBase64(b64Str) {
+      try {
+        const jsonStr = decodeURIComponent(escape(atob(b64Str)));
+        const c = JSON.parse(jsonStr);
+        return {
+          id: 'SCAN-QR',
+          categoria: c.c || 'Producto',
+          cuello: c.u || 'N/A',
+          sku: c.s || 'CTX-SKU',
+          nombre: c.n || 'Producto CapTax-A',
+          material: c.m || 'N/A',
+          peso: c.p || '-',
+          color: c.cl || 'Estándar',
+          op: c.o || '-',
+          lote: c.l || '-',
+          estado: c.e || 'En Producción',
+          fecha: c.f || '-',
+          turno: c.t || '-',
+          maquina: c.mq || '-',
+          cantidad: c.q || '-',
+          dimensiones: c.d || '-',
+          fichaCodigo: c.fc || '-',
+          ensayos: c.en || 'Cumple ensayos de calidad CapTax-A.',
+          fichaUrl: c.fu || '',
+          observaciones: c.ob || ''
+        };
+      } catch (err) {
+        console.error('Error decodificando QR:', err);
+        return null;
+      }
+    }
+
+    function buildQRTargetUrl(record) {
+      const customBase = document.getElementById('custom-base-url')?.value.trim();
+      let baseUrl = '';
+      if (customBase) {
+        baseUrl = customBase.replace(/\/+$/, '');
+      } else {
+        baseUrl = window.location.origin + window.location.pathname;
+      }
+      const encoded = encodePayloadToBase64(record);
+      return `${baseUrl}#qr=${encoded}`;
+    }
+
+    // =========================================================================
+    // INICIALIZACIÓN DE LA APLICACIÓN
+    // =========================================================================
+    window.addEventListener('DOMContentLoaded', () => {
+      renderBrandLogos();
+      loadRecordsFromStorage();
+
+      // Verificar si la URL contiene un parámetro #qr=... (al escanear un QR real)
+      if (!checkHashForScannedQR()) {
+        selectRecordToEdit(records[0]);
+      }
+      renderRecordsTable();
+    });
+
+    window.addEventListener('hashchange', () => {
+      checkHashForScannedQR();
+    });
+
+    function checkHashForScannedQR() {
+      const hash = window.location.hash || '';
+      if (hash.startsWith('#qr=')) {
+        const payload = hash.substring(4);
+        const decoded = decodePayloadFromBase64(payload);
+        if (decoded) {
+          openScanPreview(decoded, false);
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function loadRecordsFromStorage() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            records = parsed;
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('No se pudo leer localStorage:', e);
+      }
+      records = [...DEFAULT_RECORDS];
+      saveRecordsToStorage();
+    }
+
+    function saveRecordsToStorage() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+      } catch (e) {
+        console.warn('No se pudo guardar en localStorage:', e);
+      }
+    }
+
+    // =========================================================================
+    // SELECCIÓN DEL CATÁLOGO OFICIAL CAPTAX-A Y GESTIÓN DEL FORMULARIO
+    // =========================================================================
+    function applyCatalogPreset(presetKey) {
+      if (!presetKey || presetKey === 'CUSTOM') return;
+      const item = CAPTAX_CATALOG[presetKey];
+      if (!item) return;
+
+      document.getElementById('categoria').value = item.categoria;
+      document.getElementById('cuello').value = item.cuello;
+      document.getElementById('sku').value = item.sku;
+      document.getElementById('peso').value = item.peso;
+      document.getElementById('nombre').value = item.nombre;
+      document.getElementById('material').value = item.material;
+      document.getElementById('color').value = item.color;
+      document.getElementById('dimensiones').value = item.dimensiones;
+      document.getElementById('fichaCodigo').value = item.fichaCodigo;
+      document.getElementById('ensayos').value = item.ensayos;
+      document.getElementById('observaciones').value = item.observaciones;
+
+      showToast(`Especificaciones cargadas: ${item.nombre}`, 'info');
+    }
+
+    function resetFormForNew() {
+      const today = new Date().toISOString().split('T')[0];
+      const randomNum = Math.floor(510 + Math.random() * 480);
+      const preset = CAPTAX_CATALOG['PRE-96-45'];
+
+      document.getElementById('catalog-preset').value = 'PRE-96-45';
+      currentRecord = {
+        id: 'CTX-' + Date.now(),
+        categoria: preset.categoria,
+        cuello: preset.cuello,
+        sku: preset.sku,
+        peso: preset.peso,
+        nombre: preset.nombre,
+        material: preset.material,
+        color: preset.color,
+        op: `OP-2026-${randomNum}`,
+        lote: `LOTE-${today.replace(/-/g, '').slice(2)}-${Math.floor(10 + Math.random() * 89)}`,
+        estado: 'En Producción',
+        fecha: today,
+        turno: 'Mañana',
+        maquina: 'INY-PET-02 / 24 Cav',
+        cantidad: '3,600 unidades / Octabin Gaylord',
+        dimensiones: preset.dimensiones,
+        fichaCodigo: preset.fichaCodigo,
+        ensayos: preset.ensayos,
+        fichaUrl: '',
+        observaciones: preset.observaciones
+      };
+      populateForm(currentRecord);
+      updateLabelAndQR(currentRecord);
+      document.getElementById('form-mode-badge').textContent = 'Nuevo Lote Preparado';
+      showToast('Formulario listo. Elige el producto en el catálogo y presiona Generar QR.', 'info');
+    }
+
+    function populateForm(rec) {
+      document.getElementById('categoria').value = rec.categoria;
+      document.getElementById('cuello').value = rec.cuello;
+      document.getElementById('sku').value = rec.sku || '';
+      document.getElementById('peso').value = rec.peso;
+      document.getElementById('nombre').value = rec.nombre;
+      document.getElementById('material').value = rec.material;
+      document.getElementById('color').value = rec.color;
+      document.getElementById('op').value = rec.op;
+      document.getElementById('lote').value = rec.lote;
+      document.getElementById('estado').value = rec.estado;
+      document.getElementById('fecha').value = rec.fecha;
+      document.getElementById('turno').value = rec.turno;
+      document.getElementById('maquina').value = rec.maquina;
+      document.getElementById('cantidad').value = rec.cantidad;
+      document.getElementById('dimensiones').value = rec.dimensiones;
+      document.getElementById('fichaCodigo').value = rec.fichaCodigo;
+      document.getElementById('ensayos').value = rec.ensayos || '';
+      document.getElementById('fichaUrl').value = rec.fichaUrl || '';
+      document.getElementById('observaciones').value = rec.observaciones || '';
+    }
+
+    function handleFormSubmit(e) {
+      e.preventDefault();
+      const updated = {
+        id: currentRecord?.id || ('CTX-' + Date.now()),
+        categoria: document.getElementById('categoria').value,
+        cuello: document.getElementById('cuello').value,
+        sku: document.getElementById('sku').value.trim(),
+        peso: document.getElementById('peso').value.trim(),
+        nombre: document.getElementById('nombre').value.trim(),
+        material: document.getElementById('material').value,
+        color: document.getElementById('color').value.trim(),
+        op: document.getElementById('op').value.trim(),
+        lote: document.getElementById('lote').value.trim(),
+        estado: document.getElementById('estado').value,
+        fecha: document.getElementById('fecha').value,
+        turno: document.getElementById('turno').value,
+        maquina: document.getElementById('maquina').value.trim(),
+        cantidad: document.getElementById('cantidad').value.trim(),
+        dimensiones: document.getElementById('dimensiones').value.trim(),
+        fichaCodigo: document.getElementById('fichaCodigo').value.trim(),
+        ensayos: document.getElementById('ensayos').value.trim(),
+        fichaUrl: document.getElementById('fichaUrl').value.trim(),
+        observaciones: document.getElementById('observaciones').value.trim()
+      };
+
+      currentRecord = updated;
+      const idx = records.findIndex(r => r.id === updated.id);
+      if (idx >= 0) {
+        records[idx] = updated;
+      } else {
+        records.unshift(updated);
+      }
+
+      saveRecordsToStorage();
+      updateLabelAndQR(updated);
+      renderRecordsTable();
+      document.getElementById('form-mode-badge').textContent = `Lote ${updated.lote} Activo`;
+      showToast(`Código QR generado para ${updated.sku} · Lote ${updated.lote}`, 'success');
+    }
+
+    function regenerateCurrentQR() {
+      if (currentRecord) {
+        updateLabelAndQR(currentRecord);
+        showToast('URL base actualizada en el código QR.', 'info');
+      }
+    }
+
+    function updateLabelAndQR(rec) {
+      renderBrandLogos();
+
+      document.getElementById('lbl-categoria').textContent = rec.categoria.toUpperCase();
+      document.getElementById('lbl-cuello-peso').textContent = `${rec.cuello} · ${rec.peso}`;
+      document.getElementById('lbl-sku').textContent = `SKU: ${rec.sku}`;
+      document.getElementById('lbl-nombre').textContent = rec.nombre;
+      document.getElementById('lbl-lote').textContent = rec.lote;
+      document.getElementById('lbl-op').textContent = rec.op;
+      const shortMat = rec.material.split(' ')[0];
+      document.getElementById('lbl-mat').textContent = shortMat;
+      document.getElementById('lbl-fecha').textContent = rec.fecha;
+      document.getElementById('lbl-ficha').textContent = rec.fichaCodigo;
+      document.getElementById('lbl-estado').textContent = rec.estado;
+
+      const targetUrl = buildQRTargetUrl(rec);
+      document.getElementById('encoded-url-display').value = targetUrl;
+
+      const container = document.getElementById('qrcode-container');
+      container.innerHTML = '';
+      new QRCode(container, {
+        text: targetUrl,
+        width: 175,
+        height: 175,
+        colorDark: '#111413',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    }
+
+    // =========================================================================
+    // ACCIONES DE DESCARGA, COPIA E IMPRESIÓN
+    // =========================================================================
+    function downloadQRPng() {
+      const container = document.getElementById('qrcode-container');
+      const canvas = container.querySelector('canvas');
+      const img = container.querySelector('img');
+      let dataUrl = '';
+
+      if (canvas) {
+        const pad = 28;
+        const exportCanvas = document.createElement('canvas');
+        exportCanvas.width = canvas.width + pad * 2;
+        exportCanvas.height = canvas.height + pad * 2;
+        const ctx = exportCanvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+        ctx.drawImage(canvas, pad, pad);
+        dataUrl = exportCanvas.toDataURL('image/png');
+      } else if (img && img.src) {
+        dataUrl = img.src;
+      }
+
+      if (!dataUrl) {
+        showToast('No se encontró la imagen QR para descargar.', 'error');
+        return;
+      }
+
+      const link = document.createElement('a');
+      const safeLote = (currentRecord?.lote || 'QR_CapTax-A').replace(/[^a-zA-Z0-9-_]/g, '_');
+      link.download = `CapTax-A_${safeLote}.png`;
+      link.href = dataUrl;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast('Imagen PNG del QR descargada con margen blanco.', 'success');
+    }
+
+    function copyEncodedUrl() {
+      const input = document.getElementById('encoded-url-display');
+      input.select();
+      input.setSelectionRange(0, 99999);
+      try {
+        document.execCommand('copy');
+        showToast('Enlace del QR copiado al portapapeles.', 'success');
+      } catch (e) {
+        showToast('Selecciona y copia el enlace manualmente.', 'info');
+      }
+    }
+
+    // =========================================================================
+    // TABLA DE HISTORIAL DE LOTES
+    // =========================================================================
+    function getStatusBadgeClasses(estado) {
+      switch (estado) {
+        case 'Liberado / Aprobado':
+          return 'bg-brand-100 text-brand-800 border-brand-600/30';
+        case 'En Producción':
+          return 'bg-amber-100 text-amber-900 border-amber-300';
+        case 'En Control de Calidad':
+          return 'bg-purple-100 text-purple-900 border-purple-300';
+        case 'En Almacén':
+          return 'bg-teal-100 text-teal-900 border-teal-300';
+        case 'Despachado':
+          return 'bg-sky-100 text-sky-900 border-sky-300';
+        default:
+          return 'bg-neutral-100 text-neutral-800 border-neutral-300';
+      }
+    }
+
+    function renderRecordsTable() {
+      const tbody = document.getElementById('records-table-body');
+      document.getElementById('records-count').textContent = `${records.length} registro${records.length === 1 ? '' : 's'}`;
+
+      tbody.innerHTML = records.map(rec => {
+        const badgeClass = getStatusBadgeClasses(rec.estado);
+        return `
+          <tr class="hover:bg-brand-50/50 transition">
+            <td class="py-3.5 px-4">
+              <div class="font-mono font-bold text-[#111413] text-xs sm:text-sm">${escapeHtml(rec.lote)}</div>
+              <div class="font-mono text-[11px] text-[#5C6661]">${escapeHtml(rec.op)} · ${escapeHtml(rec.fecha)}</div>
+            </td>
+            <td class="py-3.5 px-4">
+              <div class="flex items-center gap-1.5 mb-1">
+                <span class="inline-block text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-brand-600 text-white">
+                  ${escapeHtml(rec.categoria)}
+                </span>
+                <span class="font-mono text-[11px] font-bold text-[#5C6661]">${escapeHtml(rec.sku)}</span>
+              </div>
+              <div class="font-semibold text-[#111413] text-xs sm:text-sm">${escapeHtml(rec.nombre)}</div>
+              <div class="text-[11px] text-[#5C6661]">${escapeHtml(rec.material)}</div>
+            </td>
+            <td class="py-3.5 px-4">
+              <span class="font-mono text-xs font-bold px-2.5 py-1 rounded-lg bg-neutral-100 text-[#111413] border border-neutral-200 inline-block">
+                ${escapeHtml(rec.cuello)} · ${escapeHtml(rec.peso)}
+              </span>
+            </td>
+            <td class="py-3.5 px-4">
+              <span class="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border ${badgeClass}">
+                <span class="w-1.5 h-1.5 rounded-full bg-current"></span>
+                ${escapeHtml(rec.estado)}
+              </span>
+            </td>
+            <td class="py-3.5 px-4">
+              <div class="font-mono text-xs font-semibold text-neutral-700">${escapeHtml(rec.fichaCodigo)}</div>
+              <div class="text-[11px] text-[#5C6661] truncate max-w-[180px]">${escapeHtml(rec.dimensiones)}</div>
+            </td>
+            <td class="py-3.5 px-4 text-right whitespace-nowrap">
+              <div class="inline-flex items-center gap-2">
+                <button type="button" onclick='selectRecordById("${rec.id}")'
+                  class="px-3 py-1.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-[#111413] text-xs font-semibold border border-neutral-200 transition cursor-pointer">
+                  Cargar / Imprimir
+                </button>
+                <button type="button" onclick='scanRecordById("${rec.id}")'
+                  class="px-3 py-1.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold transition cursor-pointer">
+                  Escanear Vista
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function selectRecordById(id) {
+      const found = records.find(r => r.id === id);
+      if (found) {
+        selectRecordToEdit(found);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        showToast(`Lote ${found.lote} cargado en el editor y etiqueta.`, 'info');
+      }
+    }
+
+    function selectRecordToEdit(rec) {
+      currentRecord = rec;
+      populateForm(rec);
+      updateLabelAndQR(rec);
+      document.getElementById('form-mode-badge').textContent = `Lote ${rec.lote} Activo`;
+    }
+
+    function scanRecordById(id) {
+      const found = records.find(r => r.id === id);
+      if (found) {
+        openScanPreview(found, true);
+      }
+    }
+
+    // =========================================================================
+    // VISTA MÓVIL DE ESCANEO QR (Lo que observa quien escanea con su teléfono)
+    // =========================================================================
+    function openScanPreview(rec, updateHash = true) {
+      if (!rec) return;
+      activeModalRecord = rec;
+
+      if (updateHash) {
+        const encoded = encodePayloadToBase64(rec);
+        history.replaceState(null, '', `#qr=${encoded}`);
+      }
+
+      document.getElementById('admin-view').classList.add('hidden');
+      document.getElementById('scan-view').classList.remove('hidden');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+
+      const statusClasses = getStatusBadgeClasses(rec.estado);
+      const hasExternalPdf = rec.fichaUrl && rec.fichaUrl.trim().length > 0;
+      const logoMarkup = getCapTaxLogoHTML('sm');
+
+      document.getElementById('scan-card-content').innerHTML = `
+        <!-- Cabecera Corporativa CapTax-A -->
+        <div class="bg-white border-b-2 border-brand-600 p-5">
+          <div class="flex items-center justify-between gap-2 mb-3">
+            <div class="bg-white">${logoMarkup}</div>
+            <div class="text-right">
+              <span class="inline-block text-[11px] font-extrabold uppercase px-2.5 py-0.5 rounded bg-brand-600 text-white">
+                ${escapeHtml(rec.categoria)}
+              </span>
+              <span class="block text-[11px] font-mono font-bold text-[#5C6661] mt-1">
+                ${escapeHtml(rec.sku)}
+              </span>
+            </div>
+          </div>
+          <h2 class="text-lg sm:text-xl font-extrabold text-[#111413] leading-snug">${escapeHtml(rec.nombre)}</h2>
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <span class="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full border ${statusClasses}">
+              <span class="w-2 h-2 rounded-full bg-current"></span>
+              ${escapeHtml(rec.estado)}
+            </span>
+            <span class="text-xs font-mono font-bold px-3 py-1 rounded-full bg-brand-50 text-brand-800 border border-brand-600/30">
+              Cuello: ${escapeHtml(rec.cuello)} · ${escapeHtml(rec.peso)}
+            </span>
+          </div>
+        </div>
+
+        <!-- Sección 1: Trazabilidad en Producción -->
+        <div class="p-5 sm:p-6 space-y-5">
+          <div>
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-brand-700 mb-3">
+              Información en Producción y Logística
+            </h3>
+            <div class="grid grid-cols-2 gap-3 bg-[#F4F7F5] p-4 rounded-2xl border border-neutral-200/90">
+              <div>
+                <span class="text-[11px] text-[#5C6661] block">Número de Lote</span>
+                <span class="text-sm font-mono font-extrabold text-[#111413]">${escapeHtml(rec.lote)}</span>
+              </div>
+              <div>
+                <span class="text-[11px] text-[#5C6661] block">Orden Producción (OP)</span>
+                <span class="text-sm font-mono font-extrabold text-[#111413]">${escapeHtml(rec.op)}</span>
+              </div>
+              <div>
+                <span class="text-[11px] text-[#5C6661] block">Fecha / Turno</span>
+                <span class="text-xs font-semibold text-[#111413]">${escapeHtml(rec.fecha)} · ${escapeHtml(rec.turno)}</span>
+              </div>
+              <div>
+                <span class="text-[11px] text-[#5C6661] block">Máquina / Línea</span>
+                <span class="text-xs font-mono font-semibold text-[#111413]">${escapeHtml(rec.maquina)}</span>
+              </div>
+              <div class="col-span-2 pt-1.5 border-t border-neutral-200">
+                <span class="text-[11px] text-[#5C6661] block">Cantidad / Unidad Logística</span>
+                <span class="text-xs font-bold text-[#111413]">${escapeHtml(rec.cantidad)}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sección 2: Especificaciones del Producto -->
+          <div>
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-brand-700 mb-3">
+              Especificaciones del Producto
+            </h3>
+            <div class="space-y-2 text-sm">
+              <div class="flex justify-between py-1.5 border-b border-neutral-100">
+                <span class="text-[#5C6661]">Cuello / Medida:</span>
+                <span class="font-bold text-[#111413]">${escapeHtml(rec.cuello)}</span>
+              </div>
+              <div class="flex justify-between py-1.5 border-b border-neutral-100">
+                <span class="text-[#5C6661]">Peso / Capacidad:</span>
+                <span class="font-bold text-[#111413]">${escapeHtml(rec.peso)}</span>
+              </div>
+              <div class="flex justify-between py-1.5 border-b border-neutral-100">
+                <span class="text-[#5C6661]">Resina / Material:</span>
+                <span class="font-semibold text-[#111413] text-right">${escapeHtml(rec.material)}</span>
+              </div>
+              <div class="flex justify-between py-1.5 border-b border-neutral-100">
+                <span class="text-[#5C6661]">Color / Pigmento:</span>
+                <span class="font-semibold text-[#111413]">${escapeHtml(rec.color)}</span>
+              </div>
+              <div class="py-1.5">
+                <span class="text-[#5C6661] block mb-1">Dimensiones y Tolerancias:</span>
+                <span class="block font-mono text-xs bg-neutral-100 p-2.5 rounded-xl text-[#111413] border border-neutral-200">
+                  ${escapeHtml(rec.dimensiones)}
+                </span>
+              </div>
+              <div class="py-1">
+                <span class="text-[#5C6661] block mb-1">Torque / Resistencia / Ensayos:</span>
+                <span class="block text-xs bg-neutral-100 p-2.5 rounded-xl text-[#111413] border border-neutral-200">
+                  ${escapeHtml(rec.ensayos)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sección 3: Ficha Técnica -->
+          <div class="bg-brand-50 border border-brand-600/30 rounded-2xl p-4">
+            <div class="flex items-start justify-between gap-2 mb-2">
+              <div>
+                <span class="text-[10px] font-extrabold uppercase tracking-wider text-brand-700 block">Ficha Técnica Asociada</span>
+                <span class="text-sm font-mono font-bold text-[#111413]">${escapeHtml(rec.fichaCodigo)}</span>
+              </div>
+              <span class="text-[11px] font-bold px-2.5 py-0.5 rounded bg-brand-600 text-white">Vigente</span>
+            </div>
+            <p class="text-xs text-neutral-700 leading-relaxed mb-3">
+              ${escapeHtml(rec.observaciones || 'Cumple estándares internos de calidad CapTax-A.')}
+            </p>
+            <div class="flex flex-col sm:flex-row gap-2">
+              <button type="button" onclick="openTechSheetModal()"
+                class="flex-1 py-2.5 px-4 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-xs font-bold shadow transition cursor-pointer">
+                Abrir Ficha Técnica Completa
+              </button>
+              ${hasExternalPdf ? `
+                <a href="${escapeHtml(rec.fichaUrl)}" target="_blank" rel="noopener noreferrer"
+                  class="flex-1 py-2.5 px-4 rounded-xl bg-white hover:bg-neutral-50 text-brand-700 border border-brand-600 text-xs font-bold text-center transition">
+                  Descargar PDF Externo ↗
+                </a>
+              ` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function exitScanView() {
+      history.replaceState(null, '', window.location.pathname);
+      document.getElementById('scan-view').classList.add('hidden');
+      document.getElementById('admin-view').classList.remove('hidden');
+      if (!currentRecord && records.length > 0) {
+        selectRecordToEdit(records[0]);
+      }
+    }
+
+    // =========================================================================
+    // MODAL DE FICHA TÉCNICA DETALLADA
+    // =========================================================================
+    function openTechSheetModal() {
+      const rec = activeModalRecord || currentRecord;
+      if (!rec) return;
+      document.getElementById('modal-ts-title').textContent = `${rec.fichaCodigo} · ${rec.categoria}`;
+      document.getElementById('modal-ts-body').innerHTML = `
+        <div class="bg-[#F4F7F5] p-4 rounded-2xl border border-neutral-200 space-y-2">
+          <div class="text-xs font-bold uppercase text-brand-700">1. Identificación Técnica CapTax-A</div>
+          <p><strong>Producto:</strong> ${escapeHtml(rec.nombre)}</p>
+          <p><strong>SKU:</strong> ${escapeHtml(rec.sku)} · <strong>Categoría:</strong> ${escapeHtml(rec.categoria)}</p>
+          <p><strong>Cuello / Medida:</strong> ${escapeHtml(rec.cuello)} · <strong>Peso / Capacidad:</strong> ${escapeHtml(rec.peso)}</p>
+          <p><strong>Resina / Material:</strong> ${escapeHtml(rec.material)} · <strong>Color:</strong> ${escapeHtml(rec.color)}</p>
+        </div>
+
+        <div class="bg-[#F4F7F5] p-4 rounded-2xl border border-neutral-200 space-y-2">
+          <div class="text-xs font-bold uppercase text-brand-700">2. Control Dimensional y Ensayos de Calidad</div>
+          <p class="font-mono text-xs bg-white p-2.5 rounded-xl border border-neutral-200">${escapeHtml(rec.dimensiones)}</p>
+          <p class="text-xs bg-white p-2.5 rounded-xl border border-neutral-200"><strong>Ensayos:</strong> ${escapeHtml(rec.ensayos)}</p>
+        </div>
+
+        <div class="bg-[#F4F7F5] p-4 rounded-2xl border border-neutral-200 space-y-2">
+          <div class="text-xs font-bold uppercase text-brand-700">3. Trazabilidad de Fabricación</div>
+          <p><strong>Lote:</strong> ${escapeHtml(rec.lote)} | <strong>OP:</strong> ${escapeHtml(rec.op)}</p>
+          <p><strong>Fecha / Turno:</strong> ${escapeHtml(rec.fecha)} (${escapeHtml(rec.turno)})</p>
+          <p><strong>Máquina / Línea:</strong> ${escapeHtml(rec.maquina)}</p>
+          <p><strong>Estado Actual:</strong> ${escapeHtml(rec.estado)}</p>
+        </div>
+
+        <div class="bg-brand-50 p-4 rounded-2xl border border-brand-600/30 space-y-1">
+          <div class="text-xs font-bold uppercase text-brand-800">4. Observaciones de Calidad y Almacenamiento</div>
+          <p class="text-xs text-[#111413] leading-relaxed">${escapeHtml(rec.observaciones || 'Sin observaciones adicionales.')}</p>
+        </div>
+      `;
+      document.getElementById('tech-sheet-modal').classList.remove('hidden');
+    }
+
+    function closeTechSheetModal() {
+      document.getElementById('tech-sheet-modal').classList.add('hidden');
+    }
+
+    function downloadTechSheetTxt() {
+      const rec = activeModalRecord || currentRecord;
+      if (!rec) return;
+      const content = [
+        '====================================================',
+        'CAPTAX-A - FICHA TECNICA Y TRAZABILIDAD DE PRODUCTO',
+        '====================================================',
+        `Codigo Ficha  : ${rec.fichaCodigo}`,
+        `SKU           : ${rec.sku}`,
+        `Producto      : ${rec.nombre}`,
+        `Categoria     : ${rec.categoria}`,
+        `Cuello/Medida : ${rec.cuello}`,
+        `Peso/Capacidad: ${rec.peso}`,
+        `Material      : ${rec.material}`,
+        `Color         : ${rec.color}`,
+        `Dimensiones   : ${rec.dimensiones}`,
+        `Ensayos       : ${rec.ensayos}`,
+        '----------------------------------------------------',
+        'DATOS DE PRODUCCION Y LOGISTICA',
+        '----------------------------------------------------',
+        `Lote          : ${rec.lote}`,
+        `Orden (OP)    : ${rec.op}`,
+        `Estado        : ${rec.estado}`,
+        `Fecha/Turno   : ${rec.fecha} - ${rec.turno}`,
+        `Maquina/Linea : ${rec.maquina}`,
+        `Cantidad      : ${rec.cantidad}`,
+        '----------------------------------------------------',
+        'OBSERVACIONES DE CALIDAD',
+        '----------------------------------------------------',
+        rec.observaciones || 'Aprobado bajo estandares CapTax-A.'
+      ].join('\n');
+
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `CapTax-A_Ficha_${rec.lote}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Ficha técnica descargada.', 'success');
+    }
+
+    // =========================================================================
+    // UTILIDADES UI (Toast & Escape HTML)
+    // =========================================================================
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      const colors = {
+        success: 'bg-brand-700 text-white border-brand-500',
+        error: 'bg-rose-900 text-white border-rose-700',
+        info: 'bg-[#111413] text-white border-neutral-700'
+      };
+      toast.className = `pointer-events-auto px-4 py-3 rounded-2xl shadow-xl border text-xs sm:text-sm font-medium transition-all transform translate-y-0 ${colors[type] || colors.info}`;
+      toast.textContent = message;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+      }, 3200);
+    }
+
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+  </script>
+</body>
+</html>
